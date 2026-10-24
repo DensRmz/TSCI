@@ -2,28 +2,38 @@
 estructura_red.py
 Módulo: Estructura de la red (parte de Carleone)
 
-Red de Petri básica para la gestión de incidentes de soporte técnico.
-Define 8 lugares, 7 transiciones, los arcos y el marcado inicial.
+Red de Petri básica (P/T) para la gestión de incidentes de soporte técnico
+en una planta industrial. Define 8 lugares, 6 transiciones (T0-T5), los arcos
+(todos de peso 1) y el marcado inicial.
+
+Modelo acordado (coincide con el documento y con motor_petri.py):
+    P1 Incidentes en cola          P5 Especialista N2 disponible
+    P2 Técnicos N1 disponibles     P6 Incidentes resueltos
+    P3 En atención N1              P7 En atención N2
+    P4 Cola de escalación N2       P8 Espacios disponibles en cola
+
+    T0 Registrar incidente         T3 Escalar a N2
+    T1 Asignar incidente a N1      T4 Iniciar atención N2
+    T2 Resolver en N1              T5 Finalizar atención N2
 
 Este módulo SOLO define la estructura (datos). La lógica de ejecución
-(verificar si una transición está habilitada, consumir/generar tokens)
-corresponde al motor de ejecución (Dennis) y la gestión de incidentes (Van).
+(habilitación, consumo y generación de tokens) está en motor_petri.py.
+
+Invariantes del modelo:
+    P1 + P8 = capacidad de la cola      P2 + P3 = técnicos N1
+    P5 + P7 = especialistas N2
 
 Uso desde otros módulos:
     from estructura_red import crear_red_incidentes
-    red = crear_red_incidentes(incidentes=5, tecnicos=2, especialistas=1)
-    red.lugares["P1"].tokens          # tokens actuales en un lugar
-    red.entradas("T1")                # [(lugar, peso), ...] que consume T1
-    red.salidas("T1")                 # [(lugar, peso), ...] que genera T1
+    red = crear_red_incidentes(capacidad_cola=5, tecnicos=2, especialistas=1)
+    red.entradas("T1")    # [(lugar, peso), ...] que consume T1
+    red.salidas("T1")     # [(lugar, peso), ...] que genera T1
 """
 
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 
 
-# ---------------------------------------------------------------------------
-# Elementos básicos de la red
-# ---------------------------------------------------------------------------
 @dataclass
 class Lugar:
     """Un lugar (place) de la red. 'tokens' es el marcado actual."""
@@ -32,7 +42,7 @@ class Lugar:
     descripcion: str
     tokens: int = 0
     tokens_iniciales: int = 0
-    es_recurso: bool = False  # True si representa recursos (técnicos/especialistas)
+    es_recurso: bool = False  # True si representa recursos (técnicos, especialista, espacios)
 
 
 @dataclass
@@ -79,7 +89,7 @@ class RedPetri:
             )
         self.arcos.append(Arco(origen, destino, peso))
 
-    # --- consultas de estructura (las usa el resto del sistema) ----------------
+    # --- consultas de estructura (las usa el resto del sistema) -----------
     def entradas(self, id_transicion: str) -> List[Tuple[str, int]]:
         """Lugares de entrada de una transición, con el peso del arco."""
         return [(a.origen, a.peso) for a in self.arcos if a.destino == id_transicion]
@@ -101,7 +111,7 @@ class RedPetri:
         lineas = ["LUGARES (marcado inicial)"]
         for l in self.lugares.values():
             tipo = "recurso" if l.es_recurso else "incidente"
-            lineas.append(f"  {l.id}  {l.nombre:<28} tokens={l.tokens}  [{tipo}]")
+            lineas.append(f"  {l.id}  {l.nombre:<30} tokens={l.tokens}  [{tipo}]")
         lineas.append("\nTRANSICIONES")
         for t in self.transiciones.values():
             ent = ", ".join(f"{p}(x{w})" for p, w in self.entradas(t.id))
@@ -110,73 +120,61 @@ class RedPetri:
         return "\n".join(lineas)
 
 
-# ---------------------------------------------------------------------------
-# Construcción de la red de incidentes (8 lugares, 7 transiciones)
-# ---------------------------------------------------------------------------
-def crear_red_incidentes(incidentes: int = 5, tecnicos: int = 2,
+def crear_red_incidentes(capacidad_cola: int = 5, tecnicos: int = 2,
                          especialistas: int = 1) -> RedPetri:
     """
     Crea la red de Petri del sistema de gestión de incidentes.
 
-    Parámetros (marcado inicial, modificables para las pruebas de Isaul):
-        incidentes     -> tokens en P1 (incidentes registrados en espera)
-        tecnicos       -> tokens en P2 (técnicos de nivel 1 disponibles)
-        especialistas  -> tokens en P5 (especialistas disponibles)
+    Parámetros (marcado inicial, modificables para las pruebas):
+        capacidad_cola -> tokens en P8 (espacios libres de la cola)
+        tecnicos       -> tokens en P2 (técnicos de Nivel 1 disponibles)
+        especialistas  -> tokens en P5 (especialistas de Nivel 2 disponibles)
     """
     red = RedPetri()
 
     # ----- 8 LUGARES -----
-    red.agregar_lugar("P1", "Incidentes en espera",
-                      "Incidentes registrados que aún no tienen técnico asignado.",
-                      tokens=incidentes)
-    red.agregar_lugar("P2", "Técnicos disponibles",
-                      "Técnicos de nivel 1 libres para atender un incidente.",
+    red.agregar_lugar("P1", "Incidentes en cola",
+                      "Tickets que esperan atención de Nivel 1; cada ficha es un incidente pendiente.")
+    red.agregar_lugar("P2", "Técnicos N1 disponibles",
+                      "Técnicos de Nivel 1 libres; cada ficha es un técnico que puede recibir un incidente.",
                       tokens=tecnicos, es_recurso=True)
-    red.agregar_lugar("P3", "En atención (nivel 1)",
-                      "Incidentes que un técnico de nivel 1 está atendiendo.")
-    red.agregar_lugar("P4", "Escalados (en espera de especialista)",
-                      "Incidentes que el técnico no pudo resolver y esperan a un especialista.")
-    red.agregar_lugar("P5", "Especialistas disponibles",
-                      "Especialistas libres para atender incidentes escalados.",
+    red.agregar_lugar("P3", "En atención N1",
+                      "Incidentes que un técnico de Nivel 1 está diagnosticando o atendiendo.")
+    red.agregar_lugar("P4", "Cola de escalación N2",
+                      "Incidentes enviados a Nivel 2 que esperan al especialista.")
+    red.agregar_lugar("P5", "Especialista N2 disponible",
+                      "Su ficha indica que el especialista puede comenzar una atención.",
                       tokens=especialistas, es_recurso=True)
-    red.agregar_lugar("P6", "En atención (especialista)",
-                      "Incidentes escalados que un especialista está atendiendo.")
-    red.agregar_lugar("P7", "Resueltos (por confirmar)",
-                      "Incidentes con solución aplicada, pendientes de confirmación del usuario.")
-    red.agregar_lugar("P8", "Incidentes cerrados",
-                      "Incidentes confirmados por el usuario y cerrados.")
+    red.agregar_lugar("P6", "Incidentes resueltos",
+                      "Casos cuya atención terminó satisfactoriamente en cualquiera de los dos niveles.")
+    red.agregar_lugar("P7", "En atención N2",
+                      "Incidentes que está atendiendo el especialista.")
+    red.agregar_lugar("P8", "Espacios disponibles en cola",
+                      "Capacidad libre de la cola; cada ficha permite registrar un nuevo ticket.",
+                      tokens=capacidad_cola, es_recurso=True)
 
-    # ----- 7 TRANSICIONES -----
-    red.agregar_transicion("T1", "Asignar a técnico",
-                           "Un técnico libre toma un incidente en espera.")
-    red.agregar_transicion("T2", "Resolver (nivel 1)",
-                           "El técnico resuelve el incidente y queda libre.")
-    red.agregar_transicion("T3", "Escalar a especialista",
-                           "El técnico no puede resolverlo: lo escala y queda libre.")
-    red.agregar_transicion("T4", "Asignar a especialista",
-                           "Un especialista libre toma un incidente escalado.")
-    red.agregar_transicion("T5", "Resolver (especialista)",
-                           "El especialista resuelve el incidente y queda libre.")
-    red.agregar_transicion("T6", "Confirmar y cerrar",
-                           "El usuario confirma la solución y el incidente se cierra.")
-    red.agregar_transicion("T7", "Reabrir incidente",
-                           "El usuario rechaza la solución: el incidente vuelve a la cola.")
+    # ----- 6 TRANSICIONES -----
+    red.agregar_transicion("T0", "Registrar incidente",
+                           "Hay un espacio libre en P8: se consume y se añade un incidente a P1.")
+    red.agregar_transicion("T1", "Asignar incidente a N1",
+                           "Hay incidente en P1 y técnico en P2: pasa a P3 y devuelve un espacio a P8.")
+    red.agregar_transicion("T2", "Resolver en N1",
+                           "El técnico resuelve el incidente: va a P6 y el técnico vuelve a P2.")
+    red.agregar_transicion("T3", "Escalar a N2",
+                           "El técnico no puede resolverlo: va a P4 y el técnico vuelve a P2.")
+    red.agregar_transicion("T4", "Iniciar atención N2",
+                           "Hay incidente en P4 y especialista en P5: el incidente pasa a P7.")
+    red.agregar_transicion("T5", "Finalizar atención N2",
+                           "El especialista termina: el incidente va a P6 y el especialista vuelve a P5.")
 
-    # ----- ARCOS -----
-    # T1: P1 + P2 -> P3
-    red.agregar_arco("P1", "T1"); red.agregar_arco("P2", "T1"); red.agregar_arco("T1", "P3")
-    # T2: P3 -> P7 + P2 (libera al técnico)
-    red.agregar_arco("P3", "T2"); red.agregar_arco("T2", "P7"); red.agregar_arco("T2", "P2")
-    # T3: P3 -> P4 + P2 (libera al técnico)
+    # ----- ARCOS (todos de peso 1) -----
+    red.agregar_arco("P8", "T0"); red.agregar_arco("T0", "P1")
+    red.agregar_arco("P1", "T1"); red.agregar_arco("P2", "T1")
+    red.agregar_arco("T1", "P3"); red.agregar_arco("T1", "P8")
+    red.agregar_arco("P3", "T2"); red.agregar_arco("T2", "P6"); red.agregar_arco("T2", "P2")
     red.agregar_arco("P3", "T3"); red.agregar_arco("T3", "P4"); red.agregar_arco("T3", "P2")
-    # T4: P4 + P5 -> P6
-    red.agregar_arco("P4", "T4"); red.agregar_arco("P5", "T4"); red.agregar_arco("T4", "P6")
-    # T5: P6 -> P7 + P5 (libera al especialista)
-    red.agregar_arco("P6", "T5"); red.agregar_arco("T5", "P7"); red.agregar_arco("T5", "P5")
-    # T6: P7 -> P8
-    red.agregar_arco("P7", "T6"); red.agregar_arco("T6", "P8")
-    # T7: P7 -> P1 (reapertura)
-    red.agregar_arco("P7", "T7"); red.agregar_arco("T7", "P1")
+    red.agregar_arco("P4", "T4"); red.agregar_arco("P5", "T4"); red.agregar_arco("T4", "P7")
+    red.agregar_arco("P7", "T5"); red.agregar_arco("T5", "P6"); red.agregar_arco("T5", "P5")
 
     return red
 
@@ -184,7 +182,7 @@ def crear_red_incidentes(incidentes: int = 5, tecnicos: int = 2,
 if __name__ == "__main__":
     red = crear_red_incidentes()
     assert len(red.lugares) == 8, "La red debe tener 8 lugares"
-    assert len(red.transiciones) == 7, "La red debe tener 7 transiciones"
+    assert len(red.transiciones) == 6, "La red debe tener 6 transiciones (T0-T5)"
     print(red.resumen())
     print(f"\nTotal: {len(red.lugares)} lugares, {len(red.transiciones)} transiciones, "
           f"{len(red.arcos)} arcos")
