@@ -1,0 +1,18 @@
+{
+  "registros_originales": 541909,
+  "registros_con_campos_clave_faltantes": 1454,
+  "registros_cancelados": 9288,
+  "registros_con_cantidad_o_precio_invalidos": 1063,
+  "registros_de_servicios_o_ajustes": 2315,
+  "registros_duplicados_exactos": 5221,
+  "registros_finales": 522568,
+  "productos_distintos": 3803,
+  "facturas_validas": 19773,
+  "facturas_con_2_o_mas_productos": 18273,
+  "facturas_entrenamiento": 15818,
+  "facturas_prueba": 3955,
+  "fecha_inicial": "2010-12-01T08:26:00",
+  "fecha_final": "2011-12-09T12:50:00",
+  "fuente": "https://archive.ics.uci.edu/dataset/352/online+retail",
+  "nota": "Apriori debe ajustarse solo con entrenamiento; prueba se reserva para evaluar."
+}
